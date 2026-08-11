@@ -1,0 +1,26 @@
+[project]
+name = "pesquisacontratos"
+version = "0.1.0"
+description = "Consulta de contratações públicas (PNCP/ComprasNet) e jurisprudência do TCU, com resumos opcionais via IA (Nvidia NIM)"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "click>=8.1",
+    "rich>=13.7",
+    "python-dotenv>=1.0",
+    "openai>=1.30",
+    "pypdf>=4.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+pesquisacontratos = "pesquisacontratos.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pesquisacontratos*"]
