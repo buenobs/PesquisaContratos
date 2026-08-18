@@ -88,8 +88,12 @@ def _requisitar(slug: str, params: dict, tentativas: int = 3) -> dict:
         _pausar_se_necessario()
         try:
             resp = requests.get(url, params=params, headers=HEADERS, timeout=HTTP_TIMEOUT)
-        finally:
+        except requests.RequestException as exc:
+            ultimo_erro = exc
             _ultima_chamada = time.time()
+            time.sleep(2 * tentativa)
+            continue
+        _ultima_chamada = time.time()
         if resp.status_code == 200:
             try:
                 return resp.json()
@@ -98,7 +102,7 @@ def _requisitar(slug: str, params: dict, tentativas: int = 3) -> dict:
         ultimo_erro = RuntimeError(f"HTTP {resp.status_code} para {slug}")
         time.sleep(2 * tentativa)
     raise TCUBloqueadoError(
-        "TCU bloqueou temporariamente as requisições (firewall de aplicação). "
+        "Não foi possível consultar o TCU (firewall de aplicação ou instabilidade de rede). "
         "Aguarde alguns minutos e tente novamente."
     ) from ultimo_erro
 

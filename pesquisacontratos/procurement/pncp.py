@@ -90,7 +90,11 @@ def _to_contratacao(item: dict) -> Contratacao:
 def buscar(objeto: str, esfera: str | None = None, ano: int | None = None,
            situacao: str | None = None, tipo_contratacao: str | None = None,
            pagina: int = 1, tam_pagina: int = 20) -> list[Contratacao]:
-    params = {"q": objeto, "pagina": pagina, "tam_pagina": tam_pagina}
+    # tipos_documento é obrigatório na API; "edital" cobre tanto licitações
+    # quanto avisos de contratação direta (confirmado empiricamente — o
+    # campo tipo_nome de cada item é que distingue os dois, não este filtro).
+    params = {"q": objeto, "pagina": pagina, "tam_pagina": tam_pagina,
+              "tipos_documento": "edital"}
     if esfera:
         params["esfera"] = ESFERA_MAP.get(esfera.lower(), esfera)
 
@@ -143,7 +147,8 @@ def listar_documentos(contratacao: Contratacao) -> list[Documento]:
 
 def testar_conexao() -> tuple[bool, str]:
     try:
-        resp = requests.get(BASE_SEARCH, params={"q": "teste", "pagina": 1, "tam_pagina": 1},
+        resp = requests.get(BASE_SEARCH, params={"q": "teste", "pagina": 1, "tam_pagina": 1,
+                                                   "tipos_documento": "edital"},
                              headers=HEADERS, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
         total = resp.json().get("total", "?")
