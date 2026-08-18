@@ -56,7 +56,8 @@ def _situacao_calculada(item: dict) -> str:
     if fim:
         try:
             data_fim = dt.datetime.fromisoformat(fim)
-            return "em andamento" if data_fim >= dt.datetime.now() else "finalizada"
+            agora = dt.datetime.now(data_fim.tzinfo) if data_fim.tzinfo else dt.datetime.now()
+            return "em andamento" if data_fim >= agora else "finalizada"
         except ValueError:
             pass
     return (item.get("situacaoCompraNomePncp") or "").lower()
