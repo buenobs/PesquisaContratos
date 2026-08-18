@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pypdf.errors import PyPdfError
+
 from pesquisacontratos.ai.client import perguntar
 
 SISTEMA = (
@@ -37,7 +39,13 @@ def resumir_pdf(caminho_pdf: str | Path, forcar: bool = False) -> str:
     if caminho_resumo.exists() and not forcar:
         return caminho_resumo.read_text(encoding="utf-8")
 
-    texto = _extrair_texto_pdf(caminho_pdf)
+    try:
+        texto = _extrair_texto_pdf(caminho_pdf)
+    except (PyPdfError, OSError) as exc:
+        # Download truncado ou arquivo que não é PDF: devolve aviso em vez de
+        # derrubar o comando (a CLI só trata IANaoConfiguradaError).
+        return (f"_Não foi possível ler este PDF ({type(exc).__name__}) — "
+                 "o download pode estar corrompido; rode `docs` novamente._")
     if not texto:
         return "_Não foi possível extrair texto deste PDF (pode ser um documento escaneado/imagem)._"
 

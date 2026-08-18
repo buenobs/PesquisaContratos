@@ -14,8 +14,14 @@ HEADERS = {"User-Agent": USER_AGENT}
 
 
 def _slug(texto: str) -> str:
-    texto = re.sub(r"[^\w\-. ]+", "_", texto or "sem_nome", flags=re.UNICODE)
-    return texto.strip()[:120] or "sem_nome"
+    """Transforma um nome vindo da API em um componente de caminho seguro."""
+    texto = re.sub(r"[^\w\-. ]+", "_", texto or "", flags=re.UNICODE).strip()[:120]
+    # "." e ".." sobrevivem ao filtro acima (o ponto é permitido) e, como
+    # componente de caminho, escapariam de downloads/. O nome do órgão vem da
+    # API, então não é dado confiável.
+    if not texto or set(texto) <= {"."}:
+        return "sem_nome"
+    return texto
 
 
 def baixar_documentos(conn: sqlite3.Connection, contratacao_id: int, contratacao: Contratacao,
