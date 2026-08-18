@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -133,11 +134,12 @@ def upsert_documento(conn: sqlite3.Connection, contratacao_id: int, tipo_documen
             )
             conn.commit()
         return
+    # baixado_em precisa ser a expressão SQL CURRENT_TIMESTAMP, não a string
+    # literal — passá-la como parâmetro gravava o texto "CURRENT_TIMESTAMP".
     conn.execute(
         """INSERT INTO documentos (contratacao_id, tipo_documento, url_origem, caminho_local, baixado_em)
-           VALUES (?, ?, ?, ?, ?)""",
-        (contratacao_id, tipo_documento, url_origem, caminho_local,
-         "CURRENT_TIMESTAMP" if caminho_local else None),
+           VALUES (?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)""",
+        (contratacao_id, tipo_documento, url_origem, caminho_local, caminho_local),
     )
     conn.commit()
 
@@ -174,12 +176,27 @@ def salvar_resumo_ia_jurisprudencia(conn: sqlite3.Connection, item_id: int, resu
     conn.commit()
 
 
+def _termo_para_fts(termo: str) -> str:
+    """Converte texto livre em uma consulta FTS5 segura.
+
+    O FTS5 tem uma sintaxe própria: pontuação, hífen e aspas são operadores, e
+    um termo natural como `art. 75` ou `sobrepreço - superfaturamento` faz o
+    MATCH lançar OperationalError. Cada palavra vira aqui uma frase entre
+    aspas, que o FTS5 combina com AND implícito.
+    """
+    palavras = re.findall(r"\w+", termo or "", flags=re.UNICODE)
+    return " ".join(f'"{p}"' for p in palavras)
+
+
 def buscar_jurisprudencia_local(conn: sqlite3.Connection, termo: str, limite: int = 50) -> list[sqlite3.Row]:
     """Busca full-text local (fallback quando a API do TCU não tiver dados/estiver indisponível)."""
+    consulta = _termo_para_fts(termo)
+    if not consulta:
+        return []
     sql = """
         SELECT j.* FROM jurisprudencia_tcu j
         JOIN jurisprudencia_fts f ON f.rowid = j.id
         WHERE jurisprudencia_fts MATCH ?
         ORDER BY rank LIMIT ?
     """
-    return conn.execute(sql, (termo, limite)).fetchall()
+    return conn.execute(sql, (consulta, limite)).fetchall()

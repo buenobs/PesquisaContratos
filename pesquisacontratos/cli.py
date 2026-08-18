@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import csv as csv_module
+import json
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from pesquisacontratos import db
 from pesquisacontratos.ai.busca_nl import interpretar
@@ -21,6 +24,18 @@ from pesquisacontratos.procurement.models import Contratacao
 console = Console()
 
 CONECTORES_PROCUREMENT = {"pncp": pncp, "comprasnet": comprasnet}
+
+
+def _celula(valor, padrao: str = "-") -> Text:
+    """Célula de tabela a partir de dado externo (API/IA).
+
+    Vai como Text, e não como str: o rich interpretaria `[...]` no texto como
+    markup — objetos de licitação ("[LOTE 1]") e ementas do TCU (que vêm com
+    HTML) chegam a apagar trechos na exibição, e um `[/algo]` solto derruba o
+    comando com MarkupError.
+    """
+    texto = "" if valor is None else str(valor)
+    return Text(texto if texto.strip() else padrao)
 
 
 @click.group()
@@ -42,7 +57,7 @@ def _executar_busca(objeto: str, esfera: str | None, ano: int | None, situacao: 
             itens = conector.buscar(objeto, esfera=esfera, ano=ano, situacao=situacao,
                                      tipo_contratacao=tipo)
         except Exception as exc:  # nunca deixa uma fonte derrubar as demais
-            console.print(f"[red]Erro consultando {nome_fonte}: {exc}[/red]")
+            console.print(f"[red]Erro consultando {nome_fonte}: {escape(str(exc))}[/red]")
             continue
         for item in itens:
             db.upsert_contratacao(conn, item.as_db_dict())
@@ -57,9 +72,10 @@ def _tabela_contratacoes(resultados: list[Contratacao]) -> Table:
         tabela.add_column(coluna, overflow="fold")
     for r in resultados:
         tabela.add_row(
-            r.fonte, r.orgao_nome or "-", f"{r.esfera or '-'}/{r.uf or '-'}",
-            (r.objeto or "")[:80], r.modalidade or "-", r.tipo_contratacao or "-",
-            r.situacao or "-", r.numero_controle or "-",
+            _celula(r.fonte), _celula(r.orgao_nome),
+            _celula(f"{r.esfera or '-'}/{r.uf or '-'}"),
+            _celula((r.objeto or "")[:80]), _celula(r.modalidade),
+            _celula(r.tipo_contratacao), _celula(r.situacao), _celula(r.numero_controle),
         )
     return tabela
 
@@ -104,7 +120,7 @@ def buscar_ia(texto_livre, fontes, csv_path):
         console.print("[yellow]IA não configurada — defina NVIDIA_API_KEY no .env. "
                        "Fazendo busca literal com o texto informado.[/yellow]")
     filtros = interpretar(texto_livre)
-    console.print(f"[dim]Interpretado como: {filtros}[/dim]")
+    console.print(f"[dim]Interpretado como: {escape(str(filtros))}[/dim]")
     resultados = _executar_busca(filtros["objeto"], filtros["esfera"], None, None,
                                   filtros["tipo_contratacao"], fontes)
     console.print(_tabela_contratacoes(resultados))
@@ -133,7 +149,7 @@ def docs(numero_controle, fonte):
         poder=row["poder"], uf=row["uf"], municipio=row["municipio"], modalidade=row["modalidade"],
         tipo_contratacao=row["tipo_contratacao"], situacao=row["situacao"], ano=row["ano"],
         data_publicacao=row["data_publicacao"], url_portal=row["url_portal"],
-        json_bruto=__import__("json").loads(row["json_bruto"]) if row["json_bruto"] else None,
+        json_bruto=json.loads(row["json_bruto"]) if row["json_bruto"] else None,
     )
     conector = CONECTORES_PROCUREMENT[fonte]
     documentos = conector.listar_documentos(contratacao)
@@ -143,7 +159,7 @@ def docs(numero_controle, fonte):
 
     baixados = baixar_documentos(conn, row["id"], contratacao, documentos)
     for caminho in baixados:
-        console.print(f"[green]Baixado:[/green] {caminho}")
+        console.print("[green]Baixado:[/green]", _celula(caminho))
     console.print(f"{len(baixados)}/{len(documentos)} documento(s) baixado(s).")
 
 
@@ -168,13 +184,14 @@ def resumir_docs(numero_controle, fonte):
         console.print("[yellow]Nenhum documento baixado ainda. Rode `docs --id ...` antes.[/yellow]")
         return
     for doc in documentos:
-        console.print(f"[bold]{doc['tipo_documento']}[/bold] ({doc['caminho_local']})")
+        console.print(f"[bold]{escape(str(doc['tipo_documento']))}[/bold] "
+                       f"({escape(str(doc['caminho_local']))})")
         try:
             resumo = resumir_pdf(doc["caminho_local"])
         except IANaoConfiguradaError as exc:
-            console.print(f"[yellow]{exc}[/yellow]")
+            console.print(f"[yellow]{escape(str(exc))}[/yellow]")
             return
-        console.print(resumo)
+        console.print(_celula(resumo))
         console.print()
 
 
@@ -193,7 +210,7 @@ def jurisprudencia(termo, base, ano, relator, colegiado, resumir_ia, csv_path):
         resultados = tcu_conector.buscar(termo, base=base, ano=ano, relator=relator,
                                           colegiado=colegiado)
     except TCUBloqueadoError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{escape(str(exc))}[/red]")
         console.print("[dim]Tentando busca local (resultados já pesquisados anteriormente)...[/dim]")
         linhas = db.buscar_jurisprudencia_local(conn, termo)
         if not linhas:
@@ -222,11 +239,12 @@ def jurisprudencia(termo, base, ano, relator, colegiado, resumir_ia, csv_path):
             except IANaoConfiguradaError as exc:
                 resumo_ia_texto = f"[IA não configurada: {exc}]"
 
-        linha = [item.base, item.tipo or "-", f"{item.numero or '-'}/{item.ano or '-'}",
-                 item.colegiado or "-", item.relator or "-", item.data_sessao or "-",
-                 (item.sumario or "")[:150]]
+        linha = [_celula(item.base), _celula(item.tipo),
+                 _celula(f"{item.numero or '-'}/{item.ano or '-'}"),
+                 _celula(item.colegiado), _celula(item.relator), _celula(item.data_sessao),
+                 _celula((item.sumario or "")[:150])]
         if resumir_ia:
-            linha.append(resumo_ia_texto)
+            linha.append(_celula(resumo_ia_texto))
         tabela.add_row(*linha)
 
     console.print(tabela)
@@ -249,10 +267,10 @@ def _imprimir_jurisprudencia_local(linhas, csv_path) -> None:
     for coluna in ("Base", "Tipo", "Número/Ano", "Colegiado", "Relator", "Sumário"):
         tabela.add_column(coluna, overflow="fold")
     for linha in linhas:
-        tabela.add_row(linha["base"], linha["tipo"] or "-",
-                        f"{linha['numero'] or '-'}/{linha['ano'] or '-'}",
-                        linha["colegiado"] or "-", linha["relator"] or "-",
-                        (linha["sumario"] or "")[:150])
+        tabela.add_row(_celula(linha["base"]), _celula(linha["tipo"]),
+                        _celula(f"{linha['numero'] or '-'}/{linha['ano'] or '-'}"),
+                        _celula(linha["colegiado"]), _celula(linha["relator"]),
+                        _celula((linha["sumario"] or "")[:150]))
     console.print(tabela)
     console.print(f"[bold]{len(linhas)}[/bold] resultado(s) do cache local.")
     if csv_path:
@@ -277,10 +295,11 @@ def status():
 
     for nome, conector in CONECTORES_PROCUREMENT.items():
         ok, msg = conector.testar_conexao()
-        tabela.add_row(nome, "[green]OK[/green]" if ok else "[red]FALHOU[/red]", msg)
+        tabela.add_row(nome, "[green]OK[/green]" if ok else "[red]FALHOU[/red]", _celula(msg))
 
     ok, msg = tcu_conector.testar_conexao()
-    tabela.add_row("tcu (jurisprudência)", "[green]OK[/green]" if ok else "[red]FALHOU[/red]", msg)
+    tabela.add_row("tcu (jurisprudência)", "[green]OK[/green]" if ok else "[red]FALHOU[/red]",
+                    _celula(msg))
 
     if ia_configurada():
         tabela.add_row("IA (Nvidia NIM)", "[green]OK[/green]", "NVIDIA_API_KEY configurada")

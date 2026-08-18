@@ -89,32 +89,42 @@ def _to_contratacao(item: dict) -> Contratacao:
 
 def buscar(objeto: str, esfera: str | None = None, ano: int | None = None,
            situacao: str | None = None, tipo_contratacao: str | None = None,
-           pagina: int = 1, tam_pagina: int = 20) -> list[Contratacao]:
-    # tipos_documento é obrigatório na API; "edital" cobre tanto licitações
-    # quanto avisos de contratação direta (confirmado empiricamente — o
-    # campo tipo_nome de cada item é que distingue os dois, não este filtro).
-    params = {"q": objeto, "pagina": pagina, "tam_pagina": tam_pagina,
-              "tipos_documento": "edital"}
-    if esfera:
-        params["esfera"] = ESFERA_MAP.get(esfera.lower(), esfera)
-
-    resp = requests.get(BASE_SEARCH, params=params, headers=HEADERS, timeout=HTTP_TIMEOUT)
-    resp.raise_for_status()
-    data = resp.json()
-
-    resultados = []
+           pagina: int = 1, tam_pagina: int = 20, max_paginas: int = 3) -> list[Contratacao]:
+    resultados: list[Contratacao] = []
     esfera_code = ESFERA_MAP.get((esfera or "").lower())
-    for item in data.get("items", []):
-        if ano and str(item.get("ano")) != str(ano):
-            continue
-        if esfera_code and item.get("esfera_id") != esfera_code:
-            continue
-        contratacao = _to_contratacao(item)
-        if situacao and situacao.lower() not in (contratacao.situacao or "").lower():
-            continue
-        if tipo_contratacao and tipo_contratacao.lower() != (contratacao.tipo_contratacao or "").lower():
-            continue
-        resultados.append(contratacao)
+
+    # Como ano/situação/tipo são filtrados no cliente (a API não os respeita de
+    # forma confiável), varrer só a primeira página faz uma busca com filtros
+    # devolver 0 resultados mesmo havendo correspondências logo adiante.
+    for pg in range(pagina, pagina + max_paginas):
+        # tipos_documento é obrigatório na API; "edital" cobre tanto licitações
+        # quanto avisos de contratação direta (confirmado empiricamente — o
+        # campo tipo_nome de cada item é que distingue os dois, não este filtro).
+        params = {"q": objeto, "pagina": pg, "tam_pagina": tam_pagina,
+                  "tipos_documento": "edital"}
+        if esfera:
+            params["esfera"] = ESFERA_MAP.get(esfera.lower(), esfera)
+
+        resp = requests.get(BASE_SEARCH, params=params, headers=HEADERS, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        itens = resp.json().get("items") or []
+        if not itens:
+            break
+
+        for item in itens:
+            if ano and str(item.get("ano")) != str(ano):
+                continue
+            if esfera_code and item.get("esfera_id") != esfera_code:
+                continue
+            contratacao = _to_contratacao(item)
+            if situacao and situacao.lower() not in (contratacao.situacao or "").lower():
+                continue
+            if tipo_contratacao and tipo_contratacao.lower() != (contratacao.tipo_contratacao or "").lower():
+                continue
+            resultados.append(contratacao)
+
+        if len(itens) < tam_pagina:  # última página
+            break
     return resultados
 
 
@@ -137,11 +147,15 @@ def listar_documentos(contratacao: Contratacao) -> list[Documento]:
     documentos = []
     for arq in arquivos:
         tipo_id = arq.get("tipoDocumentoId")
-        if tipo_id in TIPOS_DOCUMENTO_INTERESSE:
-            documentos.append(Documento(
-                tipo_documento=TIPOS_DOCUMENTO_INTERESSE[tipo_id],
-                url_origem=arq.get("url") or arq.get("uri"),
-            ))
+        if tipo_id not in TIPOS_DOCUMENTO_INTERESSE:
+            continue
+        url = arq.get("url") or arq.get("uri")
+        if not url:  # sem URL não há o que baixar; deixar passar quebraria o downloader
+            continue
+        documentos.append(Documento(
+            tipo_documento=TIPOS_DOCUMENTO_INTERESSE[tipo_id],
+            url_origem=url,
+        ))
     return documentos
 
 

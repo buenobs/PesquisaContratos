@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pesquisacontratos.jurisprudencia import tcu
 
 # Amostra real (capturada em https://pesquisa.apps.tcu.gov.br/rest/publico/base/sumula/documentosResumidos)
@@ -61,7 +63,7 @@ def test_bloqueio_waf_gera_erro_tratavel(mock_sleep, mock_get):
     resp_bloqueada.json.side_effect = ValueError("not json")
     mock_get.return_value = resp_bloqueada
 
-    resultados = tcu.buscar("qualquer coisa", base="sumula")
-
-    # buscar() nunca lança para o chamador: apenas pula a base bloqueada
-    assert resultados == []
+    # Nenhuma base respondeu: buscar() propaga um erro tratável, que é o que
+    # faz a CLI cair para o cache local (ver test_regressoes.py).
+    with pytest.raises(tcu.TCUBloqueadoError):
+        tcu.buscar("qualquer coisa", base="sumula")

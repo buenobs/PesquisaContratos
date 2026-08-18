@@ -143,6 +143,8 @@ def buscar(termo: str, base: str | None = None, ano: int | None = None,
            quantidade: int = 20) -> list[ItemJurisprudencia]:
     bases = [base] if base else list(BASES.keys())
     resultados: list[ItemJurisprudencia] = []
+    bloqueio: TCUBloqueadoError | None = None
+    alguma_base_respondeu = False
     for nome_base in bases:
         cfg = BASES[nome_base]
         params = {
@@ -155,8 +157,12 @@ def buscar(termo: str, base: str | None = None, ano: int | None = None,
             params["sinonimos"] = "true"
         try:
             data = _requisitar(cfg["slug"], params)
-        except TCUBloqueadoError:
+        except TCUBloqueadoError as exc:
+            # Uma base bloqueada não invalida as demais; só propaga se nenhuma
+            # responder (senão o fallback para o cache local nunca é acionado).
+            bloqueio = exc
             continue
+        alguma_base_respondeu = True
         for doc in data.get("documentos", []):
             item = _parse_item(nome_base, cfg["slug"], doc)
             if ano and item.ano and str(ano) != str(item.ano):
@@ -166,6 +172,8 @@ def buscar(termo: str, base: str | None = None, ano: int | None = None,
             if colegiado and colegiado.lower() not in (item.colegiado or "").lower():
                 continue
             resultados.append(item)
+    if not alguma_base_respondeu and bloqueio is not None:
+        raise bloqueio
     return resultados
 
 
