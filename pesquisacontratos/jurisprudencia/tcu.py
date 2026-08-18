@@ -39,6 +39,9 @@ HEADERS = {"User-Agent": USER_AGENT, "Accept": "application/json",
 
 INTERVALO_MINIMO_SEGUNDOS = 1.5
 
+# Tamanho de página usado nas chamadas à API (a busca em si pagina por `inicio`).
+TAM_PAGINA = 20
+
 BASES = {
     "acordao": {
         "slug": "acordao-completo",
@@ -140,38 +143,67 @@ def _parse_item(base: str, slug: str, doc: dict) -> ItemJurisprudencia:
 
 def buscar(termo: str, base: str | None = None, ano: int | None = None,
            relator: str | None = None, colegiado: str | None = None,
-           quantidade: int = 20) -> list[ItemJurisprudencia]:
+           quantidade: int = 20, max_paginas: int = 5) -> list[ItemJurisprudencia]:
+    """Busca em uma ou em todas as bases.
+
+    `quantidade` é o teto de resultados por base *depois* dos filtros. Como
+    ano/relator/colegiado são aplicados no cliente, uma página inteira pode ser
+    descartada — daí a paginação, limitada por `max_paginas` para não provocar
+    o firewall (cada requisição já custa ~1,5s de espaçamento).
+    """
     bases = [base] if base else list(BASES.keys())
     resultados: list[ItemJurisprudencia] = []
     bloqueio: TCUBloqueadoError | None = None
     alguma_base_respondeu = False
+
     for nome_base in bases:
         cfg = BASES[nome_base]
-        params = {
-            "termo": termo or "*",
-            "ordenacao": cfg["ordenacao"],
-            "quantidade": quantidade,
-            "inicio": 0,
-        }
-        if cfg.get("sinonimos"):
-            params["sinonimos"] = "true"
-        try:
-            data = _requisitar(cfg["slug"], params)
-        except TCUBloqueadoError as exc:
-            # Uma base bloqueada não invalida as demais; só propaga se nenhuma
-            # responder (senão o fallback para o cache local nunca é acionado).
-            bloqueio = exc
-            continue
-        alguma_base_respondeu = True
-        for doc in data.get("documentos", []):
-            item = _parse_item(nome_base, cfg["slug"], doc)
-            if ano and item.ano and str(ano) != str(item.ano):
-                continue
-            if relator and relator.lower() not in (item.relator or "").lower():
-                continue
-            if colegiado and colegiado.lower() not in (item.colegiado or "").lower():
-                continue
-            resultados.append(item)
+        aceitos = 0
+        inicio = 0
+
+        for _ in range(max_paginas):
+            params = {
+                "termo": termo or "*",
+                "ordenacao": cfg["ordenacao"],
+                "quantidade": TAM_PAGINA,
+                "inicio": inicio,
+            }
+            if cfg.get("sinonimos"):
+                params["sinonimos"] = "true"
+            try:
+                data = _requisitar(cfg["slug"], params)
+            except TCUBloqueadoError as exc:
+                # Uma base bloqueada não invalida as demais; só propaga se
+                # nenhuma responder (senão o fallback para o cache local em
+                # cli.py nunca é acionado).
+                bloqueio = exc
+                break
+            alguma_base_respondeu = True
+
+            documentos = data.get("documentos") or []
+            if not documentos:
+                break
+
+            for doc in documentos:
+                item = _parse_item(nome_base, cfg["slug"], doc)
+                if ano and item.ano and str(ano) != str(item.ano):
+                    continue
+                if relator and relator.lower() not in (item.relator or "").lower():
+                    continue
+                if colegiado and colegiado.lower() not in (item.colegiado or "").lower():
+                    continue
+                resultados.append(item)
+                aceitos += 1
+                if aceitos >= quantidade:
+                    break
+
+            inicio += len(documentos)
+            total = data.get("quantidadeEncontrada")
+            if aceitos >= quantidade or len(documentos) < TAM_PAGINA:
+                break
+            if total is not None and inicio >= total:
+                break
+
     if not alguma_base_respondeu and bloqueio is not None:
         raise bloqueio
     return resultados

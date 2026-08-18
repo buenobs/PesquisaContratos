@@ -50,6 +50,18 @@ Todo resultado de busca fica salvo em cache local (`pesquisacontratos.db`,
 SQLite, ignorado pelo git). Documentos baixados vão para `downloads/` (também
 ignorado pelo git).
 
+### Onde ficam os dados
+
+Rodando de um checkout do repositório (o caso de `pip install -e .`), o `.env`,
+o banco e a pasta `downloads/` ficam na raiz do projeto. Em uma instalação
+normal eles vão para o diretório de dados do usuário — `%LOCALAPPDATA%\PesquisaContratos`
+no Windows, `~/.local/share/PesquisaContratos` no Linux/macOS — para não gravar
+nada dentro do `site-packages`. Para escolher explicitamente:
+
+```bash
+export PESQUISACONTRATOS_DIR=/caminho/para/meus-dados   # Windows: set/$env:
+```
+
 ## IA (Nvidia NIM)
 
 1. Crie uma conta gratuita em https://build.nvidia.com e gere uma API key.
@@ -66,7 +78,7 @@ desativados, com um aviso claro em vez de erro.
 
 | Fonte | O que é usado | Limitações conhecidas |
 |---|---|---|
-| **PNCP** | `/api/search` (busca) + `/api/pncp/v1/orgaos/.../arquivos` (documentos) | Parâmetros de filtro server-side (esfera, status) não são oficialmente documentados nem sempre respeitados pela API — o sistema filtra no cliente por segurança. "Situação" (em andamento/finalizada) é derivada da data de fim de vigência da proposta, pois o PNCP não expõe esse status diretamente. |
+| **PNCP** | `/api/search` (busca) + `/api/pncp/v1/orgaos/.../arquivos` (documentos) | Parâmetros de filtro server-side (esfera, status) não são oficialmente documentados nem sempre respeitados pela API — o sistema filtra no cliente por segurança e, por isso, varre até 3 páginas (senão uma página cheia de itens descartados esconderia resultados válidos). "Situação" (em andamento/finalizada) é derivada da data de fim de vigência da proposta, pois o PNCP não expõe esse status diretamente. |
 | **ComprasNet / Compras.gov.br** | `/modulo-contratacoes/1_consultarContratacoes_PNCP_14133` (dadosabertos.compras.gov.br) | **Não existe busca por texto livre nesta API** — o filtro por objeto é feito no cliente sobre os resultados de uma janela de datas. Cobre só o Poder Executivo Federal. `codigoModalidade` usa uma tabela de códigos própria do Compras.gov.br (diferente da do PNCP); os códigos usados (3, 5, 6, 7) foram confirmados por amostragem real, outros podem existir mas não foram mapeados. |
 | **TCU (jurisprudência)** | `pesquisa.apps.tcu.gov.br/rest/publico/base/{base}/documentosResumidos` | Endpoint público, mas protegido por um firewall de aplicação sensível a rajadas de requisições — o conector já espaça as chamadas e faz backoff, mas buscas muito seguidas ainda podem ser bloqueadas temporariamente (nesse caso, o comando cai automaticamente para uma busca no cache local, se houver dados de buscas anteriores). Os nomes de campo de cada base foram confirmados para `sumula`; para `jurisprudencia_selecionada`, `publicacao` e `resposta_consulta` foram assumidos por analogia e podem precisar de ajuste. |
 | **IA (Nvidia NIM)** | `integrate.api.nvidia.com/v1` (compatível com OpenAI) | Depende de chave gratuita gerada pelo usuário; catálogo de modelos gratuitos muda com frequência. |
@@ -84,8 +96,22 @@ desativados, com um aviso claro em vez de erro.
 pytest
 ```
 
-Os testes usam respostas reais das APIs capturadas como fixtures (mock),
-sem depender de rede.
+Os testes usam respostas reais das APIs capturadas como fixtures (mock), sem
+depender de rede — é o que roda no CI ([GitHub Actions](.github/workflows/tests.yml),
+Python 3.10 e 3.12).
+
+### Testes de contrato (opcionais, exigem rede)
+
+Como os portais não têm contrato estável nem documentação confiável (ver a
+tabela de limitações acima), há um conjunto separado que bate nas APIs reais e
+falha quando um campo usado pelos conectores muda de nome ou some:
+
+```bash
+pytest -m contrato -v
+```
+
+Ficam fora da suíte padrão e do CI. Uma falha ali não indica bug no código:
+indica que o portal mudou e o conector correspondente precisa ser reajustado.
 
 ## Estrutura
 

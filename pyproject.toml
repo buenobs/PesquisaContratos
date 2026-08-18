@@ -18,6 +18,13 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 pesquisacontratos = "pesquisacontratos.cli:main"
 
+[tool.pytest.ini_options]
+markers = [
+    "contrato: bate nas APIs reais para detectar mudanca de contrato; exige rede e nao roda por padrao (use: pytest -m contrato)",
+]
+# A suite padrao (e o CI) fica offline e deterministica.
+addopts = "-m 'not contrato'"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

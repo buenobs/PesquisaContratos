@@ -86,7 +86,9 @@ END;
 
 
 def conectar(db_path: Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path or DB_PATH)
+    caminho = Path(db_path or DB_PATH)
+    caminho.parent.mkdir(parents=True, exist_ok=True)  # BASE_DIR pode ainda não existir
+    conn = sqlite3.connect(caminho)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
